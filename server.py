@@ -7,17 +7,21 @@ from io import BytesIO
 import gridfs
 import secrets
 import base64
+import os
 from datetime import datetime
 
 app = Flask(__name__)
 
-# Configurazione MongoDB
-MONGODB_URI = 'mongodb://localhost:27017/'
-DATABASE_NAME = 'local'
-client = MongoClient(MONGODB_URI)
-db = client[DATABASE_NAME]
+# Stringa di connessione a MongoDB Atlas
+mongo_uri = os.getenv("MONGO_URI")
+if not mongo_uri:
+    raise Exception("La variabile MONGO_URI non è configurata!")
+
+# Connessione al database MongoDB Atlas
+client = MongoClient(mongo_uri)
+db = client["my_database"]  # Nome del database trasferito
 users_collection = db["users"]
-client_collection = db["client"]
+client_collection = db["clients"]
 fs = gridfs.GridFS(db)  # GridFS per file grandi
 
 def generate_api_key():
