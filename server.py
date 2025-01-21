@@ -160,8 +160,11 @@ def add_energy_data():
         }
     }
 
+    # Variabili per calcolare la somma totale e unità di misura
+    total_sum = 0
+    measure_unit = None
+
     # Processa i dati energetici e aggiungili nelle categorie appropriate
-    total_sum = 0  # Variabile per calcolare la somma totale
     for item in data['dati']:
         if 'document_name' not in item or 'period' not in item or 'start_date' not in item['period'] or 'end_date' not in item['period']:
             return jsonify({"error": f"Dati mancanti o incompleti per l'elemento: {item}"}), 400
@@ -180,6 +183,7 @@ def add_energy_data():
                 "consumption": item["total_electricity_consumption"]
             }
             total_sum += item["total_electricity_consumption"]["value"]
+            measure_unit = item["total_electricity_consumption"]["unit"]  # Unità di misura
         elif 'consumption_sMc' in item:
             categoria = "Gas"
             dettagli = {
@@ -188,6 +192,7 @@ def add_energy_data():
                 "consumption": item["consumption_sMc"]
             }
             total_sum += item["consumption_sMc"]["value"]
+            measure_unit = item["consumption_sMc"]["unit"]  # Unità di misura
         elif 'total_diesel_consumption' in item:
             categoria = "Diesel"
             dettagli = {
@@ -196,6 +201,7 @@ def add_energy_data():
                 "consumption": item["total_diesel_consumption"]
             }
             total_sum += item["total_diesel_consumption"]["value"]
+            measure_unit = item["total_diesel_consumption"]["unit"]  # Unità di misura
         else:
             return jsonify({"error": f"Nessuna categoria valida trovata per l'elemento: {item}"}), 400
 
@@ -209,9 +215,11 @@ def add_energy_data():
         "message": f"Nuovo documento creato per il cliente {cliente['nome']} con dati energetici",
         "username": user["username"],
         "timestamp": timestamp,
-        "anno": anno,
-        "somma_totale": total_sum
+        "year": anno,
+        "total_sum": total_sum,
+        "measure_unit": measure_unit  # Aggiunge l'unità di misura
     }), 201
+
 
 @app.route('/get_category_sum', methods=['GET'])
 def get_category_sum():
@@ -475,4 +483,4 @@ def home():
     return "Hello, Render!"
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
