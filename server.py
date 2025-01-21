@@ -111,7 +111,8 @@ def create_client():
     cliente = {
         "nome": nome,
         "utenti": [],  # Lista di utenti associati al cliente
-        "dati": []  # Inizializzato come array
+        "dati": [],  # Inizializzato come array
+        "timestamp": datetime.utcnow()  # Timestamp corrente
     }
 
     client_collection.insert_one(cliente)
@@ -298,46 +299,43 @@ def get_category_sum():
 
 @app.route('/get_client_data', methods=['GET'])
 def get_client_data():
-    # Recupera l'API Key dagli header
     api_key = request.headers.get("X-API-KEY")
     if not api_key:
         return jsonify({"error": "API Key mancante"}), 401
 
-    # Trova l'utente tramite l'API Key
     user = users_collection.find_one({"api_key": api_key})
     if not user:
         return jsonify({"error": "API Key non valida"}), 401
 
-    # Recupera il nome del cliente dai parametri della richiesta
     nome_cliente = request.args.get('nome')
     if not nome_cliente:
         return jsonify({"error": "Nome cliente mancante"}), 400
 
-    # Trova i documenti relativi al cliente specificato
     documenti_cliente = list(client_collection.find({"nome": nome_cliente}))
     if not documenti_cliente:
         return jsonify({"error": "Cliente non trovato"}), 404
 
-    # Verifica che l'utente sia associato al cliente
     associato = any(api_key in documento.get("utenti", []) for documento in documenti_cliente)
     if not associato:
         return jsonify({"error": "L'utente non è autorizzato a visualizzare i dati di questo cliente"}), 403
 
-    # Trova l'ultimo documento creato per il cliente
-    ultimo_documento = max(documenti_cliente, key=lambda doc: doc["timestamp"])
+    # Trova l'ultimo documento usando una data minima di default
+    ultimo_documento = max(
+        documenti_cliente,
+        key=lambda doc: doc.get("timestamp", datetime.min)
+    )
 
-    # Recupera gli utenti associati tramite le API key memorizzate
     utenti_associati = users_collection.find({"api_key": {"$in": ultimo_documento.get("utenti", [])}})
     utenti = [{"username": utente["username"], "email": utente["email"]} for utente in utenti_associati]
 
-    # Restituisce i dati del cliente
     return jsonify({
         "cliente": ultimo_documento["nome"],
-        "timestamp": ultimo_documento["timestamp"],
-        "username": ultimo_documento["username"],
-        "dati": ultimo_documento["dati"],
+        "timestamp": ultimo_documento.get("timestamp"),  # Usa get() per evitare errori
+        "username": ultimo_documento.get("username"),  # Usa get() per evitare errori
+        "dati": ultimo_documento.get("dati", {}),
         "utenti": utenti
     }), 200
+
 
 @app.route('/upload', methods=['POST'])
 def upload_files():
