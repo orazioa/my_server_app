@@ -294,7 +294,6 @@ def add_energy_data():
     timestamp = datetime.utcnow()
 
     # Variabili per i risultati
-    response = {"message": f"Nuovo documento creato per il cliente {cliente['nome']}"}
     discarded_files = []
 
     # Processa i dati in base al document_type
@@ -302,30 +301,35 @@ def add_energy_data():
     if document_type == 'BUSINESS_TRAVEL':
         flight_data, total_flight_impact, flight_discarded = process_flight_items_with_notes(data['dati'], anno)
         discarded_files.extend(flight_discarded)
-        response.update({
+        response = {
+            "message": f"Nuovo documento creato per il cliente {cliente['nome']}",
             "document_type": "BUSINESS_TRAVEL",
             "value": total_flight_impact,
             "unit": "passenger * kilometers",
-            "note": "File extraction failed: " + ", ".join(flight_discarded)
-        })
+            "note": "File extraction failed: " + ", ".join(flight_discarded) if flight_discarded else None
+        }
     elif document_type == 'GAS':
         gas_data, total_gas, gas_discarded = process_gas_items_with_notes(data['dati'], anno)
         discarded_files.extend(gas_discarded)
-        response.update({
+        response = {
+            "message": f"Nuovo documento creato per il cliente {cliente['nome']}",
             "document_type": "GAS",
             "value": total_gas,
             "unit": "sMc",
-            "note": "File extraction failed: " + ", ".join(gas_discarded)
-        })
+            "note": "File extraction failed: " + ", ".join(gas_discarded) if gas_discarded else None
+        }
     elif document_type == 'ELECTRICITY':
         electricity_data, total_electricity, electricity_discarded = process_electricity_items_with_notes(data['dati'], anno)
         discarded_files.extend(electricity_discarded)
-        response.update({
+        response = {
+            "message": f"Nuovo documento creato per il cliente {cliente['nome']}",
             "document_type": "ELECTRICITY",
             "value": total_electricity,
             "unit": "kWh",
-            "note": "File extraction failed: " + ", ".join(electricity_discarded)
-        })
+            "note": "File extraction failed: " + ", ".join(electricity_discarded) if electricity_discarded else None
+        }
+    else:
+        return jsonify({"error": "Tipo di documento non supportato"}), 400
 
     # Prepara il nuovo documento per il cliente
     nuovo_documento = create_client_document(
@@ -339,6 +343,7 @@ def add_energy_data():
     client_collection.insert_one(nuovo_documento)
 
     return jsonify(response), 201
+
 
 def create_client_document(cliente, timestamp, user, flight_data, electricity_data, gas_data):
     """Crea il documento per il cliente."""
