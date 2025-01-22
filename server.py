@@ -251,47 +251,39 @@ def add_energy_data():
     if error:
         return jsonify(error), status_code
 
-    # Genera il timestamp corrente
-    timestamp = datetime.utcnow()
+    # Leggi il tipo di documento dal JSON
+    document_type = data.get("document_type")
+    if not document_type:
+        return jsonify({"error": "Il campo 'document_type' è mancante"}), 400
 
-    # Variabili per i risultati
-    flight_data, total_flight_impact = [], 0
-    electricity_data, total_electricity = [], 0
-    gas_data, total_gas = [], 0
+    # Processa i dati in base al tipo di documento
+    response = {"document_type": document_type}  # Inizia con il tipo di documento
 
-    # Costruisce le risposte in base ai dati forniti
-    response = {"message": f"Nuovo documento creato per il cliente {cliente['nome']}"}
-
-    if any('travel' in item for item in data['dati']):
+    if document_type == "BUSINESS_TRAVEL":
         flight_data, total_flight_impact = process_flight_items(data['dati'], anno)
         response.update({
-            "total_flight_impact": total_flight_impact,
-            "measure_unit": "passenger * kilometers",
-            "TotalFlightDist": flight_data
+            "value": total_flight_impact,
+            "unit": "passenger * kilometers"
         })
 
-    if any('total_electricity_consumption' in item for item in data['dati']):
+    elif document_type == "ELECTRICITY":
         electricity_data, total_electricity = process_electricity_items(data['dati'], anno)
         response.update({
-            "total_electricity": total_electricity,
-            "measure_unit": "kWh",
-            "Elettricità": electricity_data
+            "value": total_electricity,
+            "unit": "kWh"
         })
 
-    if any('consumption_sMc' in item for item in data['dati']):
+    elif document_type == "GAS":
         gas_data, total_gas = process_gas_items(data['dati'], anno)
         response.update({
-            "total_gas": total_gas,
-            "measure_unit": "sMc",
-            "Gas": gas_data
+            "value": total_gas,
+            "unit": "sMc"
         })
 
-    # Prepara il nuovo documento per il cliente
-    nuovo_documento = create_client_document(cliente, timestamp, user, flight_data, electricity_data, gas_data)
+    else:
+        return jsonify({"error": f"Tipo di documento non valido: {document_type}"}), 400
 
-    # Inserisci il nuovo documento nella collezione `client`
-    client_collection.insert_one(nuovo_documento)
-
+    # Restituisce la risposta JSON
     return jsonify(response), 201
 
 def create_client_document(cliente, timestamp, user, flight_data, electricity_data, gas_data):
