@@ -189,7 +189,6 @@ def process_flight_items_with_notes(items, anno):
         # Controlla se la data appartiene all'anno specificato
         flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
         if flight_date.year != anno:
-            discarded_files.append(item['document_name'])
             continue
 
         # Calcola la distanza utilizzando l'API esterna
@@ -197,7 +196,6 @@ def process_flight_items_with_notes(items, anno):
             distance = get_distance_with_api(item['travel']['from'], item['travel']['to'])
         except Exception as e:
             print(f"Errore: {str(e)}")
-            discarded_files.append(item['document_name'])
             continue
 
         # Calcola l'impatto del volo (distanza * numero di passeggeri)
@@ -232,7 +230,6 @@ def process_gas_items_with_notes(items, anno):
         start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
         end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
         if start_date.year != anno and end_date.year != anno:
-            discarded_files.append(item['document_name'])
             continue
 
         # Somma il consumo
@@ -258,7 +255,6 @@ def process_electricity_items_with_notes(items, anno):
         start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
         end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
         if start_date.year != anno and end_date.year != anno:
-            discarded_files.append(item['document_name'])
             continue
 
         # Somma il consumo
@@ -303,7 +299,7 @@ def add_energy_data():
             "document_type": "BUSINESS_TRAVEL",
             "value": total_flight_impact,
             "unit": "km",
-            "note": "File extraction failed: " + ", ".join(flight_discarded) if flight_discarded else None
+            "note": "Date extraction failed: " + ", ".join(flight_discarded) if flight_discarded else None
         }
     elif document_type == 'GAS':
         gas_data, total_gas, gas_discarded = process_gas_items_with_notes(data['dati'], anno)
@@ -313,7 +309,7 @@ def add_energy_data():
             "document_type": "GAS",
             "value": total_gas,
             "unit": "sMc",
-            "note": "File extraction failed: " + ", ".join(gas_discarded) if gas_discarded else None
+            "note": "Date extraction failed: " + ", ".join(gas_discarded) if gas_discarded else None
         }
     elif document_type == 'ELECTRICITY':
         electricity_data, total_electricity, electricity_discarded = process_electricity_items_with_notes(data['dati'], anno)
@@ -323,7 +319,7 @@ def add_energy_data():
             "document_type": "ELECTRICITY",
             "value": total_electricity,
             "unit": "kWh",
-            "note": "File extraction failed: " + ", ".join(electricity_discarded) if electricity_discarded else None
+            "note": "Date extraction failed: " + ", ".join(electricity_discarded) if electricity_discarded else None
         }
     else:
         return jsonify({"error": "Tipo di documento non supportato"}), 400
