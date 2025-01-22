@@ -9,6 +9,7 @@ import secrets
 import base64
 import os
 import math
+import requests
 from datetime import datetime
 
 app = Flask(__name__)
@@ -123,16 +124,6 @@ def create_client():
         "cliente": {"nome": nome, "dati": cliente["dati"]}
     }), 201
 
-def haversine(lat1, lon1, lat2, lon2):
-    """Calcola la distanza tra due punti in base alla formula di Haversine."""
-    R = 6371  # Raggio della Terra in km
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    return R * c  # Distanza in km
-
 def validate_api_key(api_key):
     """Valida l'API Key e restituisce l'utente associato."""
     if not api_key:
@@ -152,15 +143,25 @@ def get_associated_client(api_key):
 
     return cliente, None, None
 
-def validate_airport_coordinates(from_code, to_code):
-    """Recupera le coordinate degli aeroporti e verifica la loro esistenza."""
-    from_coords = airports_collection.find_one({"iata": from_code}, {"latitude": 1, "longitude": 1, "_id": 0})
-    to_coords = airports_collection.find_one({"iata": to_code}, {"latitude": 1, "longitude": 1, "_id": 0})
+def get_distance_with_api(from_code, to_code):
+    """Calcola la distanza utilizzando l'API esterna."""
+    api_key = os.getenv("API_AERO_KEY")  # La tua chiave API per l'API esterna
+    if not api_key:
+        raise Exception("API Key per l'API esterna non configurata")
 
-    if not from_coords or not to_coords:
-        return None, None, {"error": f"Impossibile trovare le coordinate per uno degli aeroporti: {from_code}, {to_code}"}, 400
+    units = "km"  # Puoi scegliere 'mi' per miglia
+    url = f"http://airport.api.aero/airport/distance/{from_code}/{to_code}?user_key={api_key}&units={units}"
 
-    return from_coords, to_coords, None, None
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            if 'distance' in data:
+                return float(data['distance'])  # Ritorna la distanza in km
+        print(f"API esterna fallita per {from_code}-{to_code}. Risposta: {response.status_code}")
+    except Exception as e:
+        print(f"Errore durante la chiamata all'API esterna per {from_code}-{to_code}: {str(e)}")
+    raise Exception(f"Impossibile calcolare la distanza per {from_code}-{to_code} utilizzando l'API")
 
 def get_and_validate_request_data():
     """Recupera e valida i dati della richiesta."""
@@ -174,7 +175,7 @@ def get_and_validate_request_data():
     return data, anno, None, None
 
 def process_flight_items_with_notes(items, anno):
-    """Processa i dati relativi ai voli e restituisce i documenti scartati."""
+    """Processa i dati relativi ai voli e calcola l'impatto per l'anno specificato."""
     valid_data = []
     total_flight_impact = 0
     discarded_files = []
@@ -191,18 +192,15 @@ def process_flight_items_with_notes(items, anno):
             discarded_files.append(item['document_name'])
             continue
 
-        # Recupera le coordinate e calcola la distanza
-        from_coords, to_coords, error, status_code = validate_airport_coordinates(
-            item['travel']['from'], item['travel']['to']
-        )
-        if error:
+        # Calcola la distanza utilizzando l'API esterna
+        try:
+            distance = get_distance_with_api(item['travel']['from'], item['travel']['to'])
+        except Exception as e:
+            print(f"Errore: {str(e)}")
             discarded_files.append(item['document_name'])
-            continue  # Ignora l'errore per continuare con altri elementi
+            continue
 
-        distance = haversine(
-            from_coords['latitude'], from_coords['longitude'],
-            to_coords['latitude'], to_coords['longitude']
-        )
+        # Calcola l'impatto del volo (distanza * numero di passeggeri)
         flight_impact = distance * item['num_of_travelers']
         total_flight_impact += flight_impact
 
@@ -217,7 +215,6 @@ def process_flight_items_with_notes(items, anno):
         })
 
     return valid_data, total_flight_impact, discarded_files
-
 
 def process_gas_items_with_notes(items, anno):
     """Processa i dati relativi al gas e restituisce i documenti scartati."""
