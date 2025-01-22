@@ -305,7 +305,7 @@ def add_energy_data():
             "message": f"Nuovo documento creato per il cliente {cliente['nome']}",
             "document_type": "BUSINESS_TRAVEL",
             "value": total_flight_impact,
-            "unit": "passenger * kilometers",
+            "unit": "km",
             "note": "File extraction failed: " + ", ".join(flight_discarded) if flight_discarded else None
         }
     elif document_type == 'GAS':
