@@ -263,18 +263,58 @@ def add_energy_data():
     # Genera il timestamp corrente
     timestamp = datetime.utcnow()
 
-    # Processa i dati delle categorie
-    flight_data, error, status_code = process_flight_data(data['dati'].get('TotalFlightDist', []), anno)
-    if error:
-        return jsonify(error), status_code
+    # Variabili per i risultati
+    flight_data, electricity_data, gas_data = [], [], []
+    total_flight_impact, total_electricity, total_gas = 0, 0, 0
 
-    electricity_data, error, status_code = process_energy_data(data['dati'].get('Elettricità', []), anno, 'total_electricity_consumption', 'Elettricità')
-    if error:
-        return jsonify(error), status_code
+    # Itera su tutti gli elementi nella lista `dati`
+    for item in data['dati']:
+        # TotalFlightDist
+        if 'travel' in item and 'num_of_travelers' in item and 'date' in item:
+            flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
+            if flight_date.year != anno:
+                continue
 
-    gas_data, error, status_code = process_energy_data(data['dati'].get('Gas', []), anno, 'consumption_sMc', 'Gas')
-    if error:
-        return jsonify(error), status_code
+            from_airport = item['travel']['from']
+            to_airport = item['travel']['to']
+
+            # Recupera le coordinate
+            from_coords, to_coords, error, status_code = validate_airport_coordinates(from_airport, to_airport)
+            if error:
+                return jsonify(error), status_code
+
+            distance = haversine(from_coords['latitude'], from_coords['longitude'], to_coords['latitude'], to_coords['longitude'])
+            flight_impact = distance * item['num_of_travelers']
+            total_flight_impact += flight_impact
+
+            flight_data.append({
+                "document_name": item["document_name"],
+                "date": item["date"],
+                "travel": item["travel"],
+                "num_of_travelers": item["num_of_travelers"],
+                "distance": distance,
+                "impact": flight_impact
+            })
+
+        # Gas
+        elif 'consumption_sMc' in item:
+            start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
+            end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
+            if start_date.year != anno and end_date.year != anno:
+                continue
+
+            gas_data.append(item)
+            total_gas += item['consumption_sMc']['value']
+
+        # Elettricità
+        elif 'total_electricity_consumption' in item:
+            start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
+            end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
+            if start_date.year != anno and end_date.year != anno:
+                continue
+
+            electricity_data.append(item)
+            total_electricity += item['total_electricity_consumption']['value']
 
     # Prepara il nuovo documento per il cliente
     nuovo_documento = {
@@ -283,9 +323,9 @@ def add_energy_data():
         "username": user["username"],
         "utenti": cliente["utenti"],
         "dati": {
-            "TotalFlightDist": flight_data["flight_details"],
-            "Elettricità": electricity_data["details"],
-            "Gas": gas_data["details"]
+            "TotalFlightDist": flight_data,
+            "Elettricità": electricity_data,
+            "Gas": gas_data
         }
     }
 
@@ -297,15 +337,16 @@ def add_energy_data():
         "username": user["username"],
         "timestamp": timestamp,
         "year": anno,
-        "total_flight_impact": flight_data["total_sum"],
-        "total_electricity": electricity_data["total_sum"],
-        "total_gas": gas_data["total_sum"],
+        "total_flight_impact": total_flight_impact,
+        "total_electricity": total_electricity,
+        "total_gas": total_gas,
         "measure_unit": {
             "TotalFlightDist": "passenger * kilometers",
             "Elettricità": "kWh",
             "Gas": "sMc"
         }
     }), 201
+
 
 @app.route('/get_client_data', methods=['GET'])
 def get_client_data():
