@@ -162,78 +162,75 @@ def validate_airport_coordinates(from_code, to_code):
 
     return from_coords, to_coords, None, None
 
-def process_flight_data(data, anno):
-    """Processa i dati dei voli e calcola il totale dell'impatto dei voli."""
-    total_sum = 0
-    flight_details = []
+def get_and_validate_request_data():
+    """Recupera e valida i dati della richiesta."""
+    data = request.json
+    if not data or not isinstance(data, dict) or 'anno' not in data or 'dati' not in data:
+        return None, None, {"error": "Formato dati non valido. Deve essere un dizionario con 'anno' e 'dati'"}, 400
+    try:
+        anno = int(data['anno'])
+    except ValueError:
+        return None, None, {"error": "Anno non valido. Deve essere un numero intero"}, 400
+    return data, anno, None, None
 
-    for item in data:
-        # Validazione dei dati
-        if 'document_name' not in item or 'num_of_travelers' not in item or 'travel' not in item or 'date' not in item:
-            return None, {"error": f"Dati mancanti o incompleti per l'elemento: {item}"}, 400
+def process_gas_items(items, anno):
+    """Processa i dati relativi al gas."""
+    gas_data = []
+    total_gas = 0
+    for item in items:
+        if 'consumption_sMc' in item:
+            start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
+            end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
+            if start_date.year != anno and end_date.year != anno:
+                continue
+            gas_data.append(item)
+            total_gas += item['consumption_sMc']['value']
+    return gas_data, total_gas
 
-        # Verifica se la data appartiene all'anno specificato
-        flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
-        if flight_date.year != anno:
-            continue
 
-        # Recupera i codici degli aeroporti
-        from_airport = item['travel']['from']
-        to_airport = item['travel']['to']
+def process_electricity_items(items, anno):
+    """Processa i dati relativi all'elettricità."""
+    electricity_data = []
+    total_electricity = 0
+    for item in items:
+        if 'total_electricity_consumption' in item:
+            start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
+            end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
+            if start_date.year != anno and end_date.year != anno:
+                continue
+            electricity_data.append(item)
+            total_electricity += item['total_electricity_consumption']['value']
+    return electricity_data, total_electricity
 
-        # Recupera le coordinate degli aeroporti
-        from_coords, to_coords, error, status_code = validate_airport_coordinates(from_airport, to_airport)
-        if error:
-            return None, error, status_code
-
-        # Calcola la distanza del volo
-        distance = haversine(from_coords['latitude'], from_coords['longitude'], to_coords['latitude'], to_coords['longitude'])
-
-        # Calcola l'impatto del volo
-        num_of_travelers = item['num_of_travelers']
-        flight_impact = distance * num_of_travelers
-        total_sum += flight_impact
-
-        # Aggiungi i dettagli del volo
-        flight_details.append({
-            "document_name": item["document_name"],
-            "date": item["date"],
-            "travel": item["travel"],
-            "num_of_travelers": num_of_travelers,
-            "distance": distance,
-            "impact": flight_impact
-        })
-
-    return {"flight_details": flight_details, "total_sum": total_sum}, None, None
-
-def process_energy_data(data, anno, category_key, category_name):
-    """Processa i dati per una categoria energetica."""
-    total_sum = 0
-    category_details = []
-
-    for item in data:
-        if 'document_name' not in item or 'period' not in item or 'start_date' not in item['period'] or 'end_date' not in item['period']:
-            return None, {"error": f"Dati mancanti o incompleti per l'elemento: {item}"}, 400
-
-        # Verifica se il periodo appartiene all'anno specificato
-        start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
-        end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
-        if start_date.year != anno and end_date.year != anno:
-            continue
-
-        # Calcola il consumo totale
-        if category_key in item:
-            consumption = item[category_key]
-            total_sum += consumption['value']
-
-            # Aggiungi i dettagli
-            category_details.append({
+def process_flight_items(items, anno):
+    """Processa i dati relativi ai voli."""
+    flight_data = []
+    total_flight_impact = 0
+    for item in items:
+        if 'travel' in item and 'num_of_travelers' in item and 'date' in item:
+            flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
+            if flight_date.year != anno:
+                continue
+            from_coords, to_coords, error, status_code = validate_airport_coordinates(
+                item['travel']['from'], item['travel']['to']
+            )
+            if error:
+                continue  # Ignora l'errore per continuare con altri elementi
+            distance = haversine(
+                from_coords['latitude'], from_coords['longitude'],
+                to_coords['latitude'], to_coords['longitude']
+            )
+            flight_impact = distance * item['num_of_travelers']
+            total_flight_impact += flight_impact
+            flight_data.append({
                 "document_name": item["document_name"],
-                "period": item["period"],
-                "consumption": consumption
+                "date": item["date"],
+                "travel": item["travel"],
+                "num_of_travelers": item["num_of_travelers"],
+                "distance": distance,
+                "impact": flight_impact
             })
-
-    return {"details": category_details, "total_sum": total_sum}, None, None
+    return flight_data, total_flight_impact
 
 @app.route('/add_energy_data', methods=['POST'])
 def add_energy_data():
@@ -249,75 +246,57 @@ def add_energy_data():
     if error:
         return jsonify(error), status_code
 
-    # Recupera il JSON dai dati della richiesta
-    data = request.json
-    if not data or not isinstance(data, dict) or 'anno' not in data or 'dati' not in data:
-        return jsonify({"error": "Formato dati non valido. Deve essere un dizionario con 'anno' e 'dati'"}), 400
-
-    # Verifica l'anno
-    try:
-        anno = int(data['anno'])
-    except ValueError:
-        return jsonify({"error": "Anno non valido. Deve essere un numero intero"}), 400
+    # Recupera e valida i dati della richiesta
+    data, anno, error, status_code = get_and_validate_request_data()
+    if error:
+        return jsonify(error), status_code
 
     # Genera il timestamp corrente
     timestamp = datetime.utcnow()
 
     # Variabili per i risultati
-    flight_data, electricity_data, gas_data = [], [], []
-    total_flight_impact, total_electricity, total_gas = 0, 0, 0
+    flight_data, total_flight_impact = [], 0
+    electricity_data, total_electricity = [], 0
+    gas_data, total_gas = [], 0
 
-    # Itera su tutti gli elementi nella lista `dati`
-    for item in data['dati']:
-        # TotalFlightDist
-        if 'travel' in item and 'num_of_travelers' in item and 'date' in item:
-            flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
-            if flight_date.year != anno:
-                continue
+    # Costruisce le risposte in base ai dati forniti
+    response = {"message": f"Nuovo documento creato per il cliente {cliente['nome']}"}
 
-            from_airport = item['travel']['from']
-            to_airport = item['travel']['to']
+    if any('travel' in item for item in data['dati']):
+        flight_data, total_flight_impact = process_flight_items(data['dati'], anno)
+        response.update({
+            "total_flight_impact": total_flight_impact,
+            "measure_unit": "passenger * kilometers",
+            "TotalFlightDist": flight_data
+        })
 
-            # Recupera le coordinate
-            from_coords, to_coords, error, status_code = validate_airport_coordinates(from_airport, to_airport)
-            if error:
-                return jsonify(error), status_code
+    if any('total_electricity_consumption' in item for item in data['dati']):
+        electricity_data, total_electricity = process_electricity_items(data['dati'], anno)
+        response.update({
+            "total_electricity": total_electricity,
+            "measure_unit": "kWh",
+            "Elettricità": electricity_data
+        })
 
-            distance = haversine(from_coords['latitude'], from_coords['longitude'], to_coords['latitude'], to_coords['longitude'])
-            flight_impact = distance * item['num_of_travelers']
-            total_flight_impact += flight_impact
-
-            flight_data.append({
-                "document_name": item["document_name"],
-                "date": item["date"],
-                "travel": item["travel"],
-                "num_of_travelers": item["num_of_travelers"],
-                "distance": distance,
-                "impact": flight_impact
-            })
-
-        # Gas
-        elif 'consumption_sMc' in item:
-            start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
-            end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
-            if start_date.year != anno and end_date.year != anno:
-                continue
-
-            gas_data.append(item)
-            total_gas += item['consumption_sMc']['value']
-
-        # Elettricità
-        elif 'total_electricity_consumption' in item:
-            start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
-            end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
-            if start_date.year != anno and end_date.year != anno:
-                continue
-
-            electricity_data.append(item)
-            total_electricity += item['total_electricity_consumption']['value']
+    if any('consumption_sMc' in item for item in data['dati']):
+        gas_data, total_gas = process_gas_items(data['dati'], anno)
+        response.update({
+            "total_gas": total_gas,
+            "measure_unit": "sMc",
+            "Gas": gas_data
+        })
 
     # Prepara il nuovo documento per il cliente
-    nuovo_documento = {
+    nuovo_documento = create_client_document(cliente, timestamp, user, flight_data, electricity_data, gas_data)
+
+    # Inserisci il nuovo documento nella collezione `client`
+    client_collection.insert_one(nuovo_documento)
+
+    return jsonify(response), 201
+
+def create_client_document(cliente, timestamp, user, flight_data, electricity_data, gas_data):
+    """Crea il documento per il cliente."""
+    return {
         "nome": cliente["nome"],
         "timestamp": timestamp,
         "username": user["username"],
@@ -328,24 +307,6 @@ def add_energy_data():
             "Gas": gas_data
         }
     }
-
-    # Inserisci il nuovo documento nella collezione `client`
-    client_collection.insert_one(nuovo_documento)
-
-    return jsonify({
-        "message": f"Nuovo documento creato per il cliente {cliente['nome']} con dati energetici",
-        "username": user["username"],
-        "timestamp": timestamp,
-        "year": anno,
-        "total_flight_impact": total_flight_impact,
-        "total_electricity": total_electricity,
-        "total_gas": total_gas,
-        "measure_unit": {
-            "TotalFlightDist": "passenger * kilometers",
-            "Elettricità": "kWh",
-            "Gas": "sMc"
-        }
-    }), 201
 
 
 @app.route('/get_client_data', methods=['GET'])
