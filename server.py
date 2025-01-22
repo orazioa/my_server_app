@@ -8,6 +8,7 @@ import gridfs
 import secrets
 import base64
 import os
+import math
 from datetime import datetime
 
 app = Flask(__name__)
@@ -22,6 +23,7 @@ client = MongoClient(mongo_uri)
 db = client["my_database"]  # Nome del database trasferito
 users_collection = db["users"]
 client_collection = db["clients"]
+airports_collection = db["airports"]
 fs = gridfs.GridFS(db)  # GridFS per file grandi
 
 def generate_api_key():
@@ -121,22 +123,131 @@ def create_client():
         "cliente": {"nome": nome, "dati": cliente["dati"]}
     }), 201
 
+def haversine(lat1, lon1, lat2, lon2):
+    """Calcola la distanza tra due punti in base alla formula di Haversine."""
+    R = 6371  # Raggio della Terra in km
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c  # Distanza in km
+
+def validate_api_key(api_key):
+    """Valida l'API Key e restituisce l'utente associato."""
+    if not api_key:
+        return None, {"error": "API Key mancante"}, 401
+
+    user = users_collection.find_one({"api_key": api_key})
+    if not user:
+        return None, {"error": "API Key non valida"}, 401
+
+    return user, None, None
+
+def get_associated_client(api_key):
+    """Trova il cliente associato all'utente tramite l'API Key."""
+    cliente = client_collection.find_one({"utenti": api_key})
+    if not cliente:
+        return None, {"error": "L'utente non è associato a nessun cliente"}, 403
+
+    return cliente, None, None
+
+def validate_airport_coordinates(from_code, to_code):
+    """Recupera le coordinate degli aeroporti e verifica la loro esistenza."""
+    from_coords = airports_collection.find_one({"iata": from_code}, {"latitude": 1, "longitude": 1, "_id": 0})
+    to_coords = airports_collection.find_one({"iata": to_code}, {"latitude": 1, "longitude": 1, "_id": 0})
+
+    if not from_coords or not to_coords:
+        return None, None, {"error": f"Impossibile trovare le coordinate per uno degli aeroporti: {from_code}, {to_code}"}, 400
+
+    return from_coords, to_coords, None, None
+
+def process_flight_data(data, anno):
+    """Processa i dati dei voli e calcola il totale dell'impatto dei voli."""
+    total_sum = 0
+    flight_details = []
+
+    for item in data:
+        # Validazione dei dati
+        if 'document_name' not in item or 'num_of_travelers' not in item or 'travel' not in item or 'date' not in item:
+            return None, {"error": f"Dati mancanti o incompleti per l'elemento: {item}"}, 400
+
+        # Verifica se la data appartiene all'anno specificato
+        flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
+        if flight_date.year != anno:
+            continue
+
+        # Recupera i codici degli aeroporti
+        from_airport = item['travel']['from']
+        to_airport = item['travel']['to']
+
+        # Recupera le coordinate degli aeroporti
+        from_coords, to_coords, error, status_code = validate_airport_coordinates(from_airport, to_airport)
+        if error:
+            return None, error, status_code
+
+        # Calcola la distanza del volo
+        distance = haversine(from_coords['latitude'], from_coords['longitude'], to_coords['latitude'], to_coords['longitude'])
+
+        # Calcola l'impatto del volo
+        num_of_travelers = item['num_of_travelers']
+        flight_impact = distance * num_of_travelers
+        total_sum += flight_impact
+
+        # Aggiungi i dettagli del volo
+        flight_details.append({
+            "document_name": item["document_name"],
+            "date": item["date"],
+            "travel": item["travel"],
+            "num_of_travelers": num_of_travelers,
+            "distance": distance,
+            "impact": flight_impact
+        })
+
+    return {"flight_details": flight_details, "total_sum": total_sum}, None, None
+
+def process_energy_data(data, anno, category_key, category_name):
+    """Processa i dati per una categoria energetica."""
+    total_sum = 0
+    category_details = []
+
+    for item in data:
+        if 'document_name' not in item or 'period' not in item or 'start_date' not in item['period'] or 'end_date' not in item['period']:
+            return None, {"error": f"Dati mancanti o incompleti per l'elemento: {item}"}, 400
+
+        # Verifica se il periodo appartiene all'anno specificato
+        start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
+        end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
+        if start_date.year != anno and end_date.year != anno:
+            continue
+
+        # Calcola il consumo totale
+        if category_key in item:
+            consumption = item[category_key]
+            total_sum += consumption['value']
+
+            # Aggiungi i dettagli
+            category_details.append({
+                "document_name": item["document_name"],
+                "period": item["period"],
+                "consumption": consumption
+            })
+
+    return {"details": category_details, "total_sum": total_sum}, None, None
 
 @app.route('/add_energy_data', methods=['POST'])
 def add_energy_data():
     api_key = request.headers.get("X-API-KEY")
-    if not api_key:
-        return jsonify({"error": "API Key mancante"}), 401
 
-    # Verifica se l'utente è valido
-    user = users_collection.find_one({"api_key": api_key})
-    if not user:
-        return jsonify({"error": "API Key non valida"}), 401
+    # Valida l'API Key
+    user, error, status_code = validate_api_key(api_key)
+    if error:
+        return jsonify(error), status_code
 
-    # Trova il cliente associato all'utente
-    cliente = client_collection.find_one({"utenti": api_key})
-    if not cliente:
-        return jsonify({"error": "L'utente non è associato a nessun cliente"}), 403
+    # Trova il cliente associato
+    cliente, error, status_code = get_associated_client(api_key)
+    if error:
+        return jsonify(error), status_code
 
     # Recupera il JSON dai dati della richiesta
     data = request.json
@@ -152,66 +263,31 @@ def add_energy_data():
     # Genera il timestamp corrente
     timestamp = datetime.utcnow()
 
-    # Prepara un nuovo documento per il cliente
+    # Processa i dati delle categorie
+    flight_data, error, status_code = process_flight_data(data['dati'].get('TotalFlightDist', []), anno)
+    if error:
+        return jsonify(error), status_code
+
+    electricity_data, error, status_code = process_energy_data(data['dati'].get('Elettricità', []), anno, 'total_electricity_consumption', 'Elettricità')
+    if error:
+        return jsonify(error), status_code
+
+    gas_data, error, status_code = process_energy_data(data['dati'].get('Gas', []), anno, 'consumption_sMc', 'Gas')
+    if error:
+        return jsonify(error), status_code
+
+    # Prepara il nuovo documento per il cliente
     nuovo_documento = {
         "nome": cliente["nome"],
         "timestamp": timestamp,
         "username": user["username"],
         "utenti": cliente["utenti"],
         "dati": {
-            "Elettricità": [],
-            "Gas": [],
-            "Diesel": []
+            "TotalFlightDist": flight_data["flight_details"],
+            "Elettricità": electricity_data["details"],
+            "Gas": gas_data["details"]
         }
     }
-
-    # Variabili per calcolare la somma totale e unità di misura
-    total_sum = 0
-    measure_unit = None
-
-    # Processa i dati energetici e aggiungili nelle categorie appropriate
-    for item in data['dati']:
-        if 'document_name' not in item or 'period' not in item or 'start_date' not in item['period'] or 'end_date' not in item['period']:
-            return jsonify({"error": f"Dati mancanti o incompleti per l'elemento: {item}"}), 400
-
-        # Verifica se i dati appartengono all'anno specificato
-        data_inizio = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
-        data_fine = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
-        if data_inizio.year != anno and data_fine.year != anno:
-            continue
-
-        if 'total_electricity_consumption' in item:
-            categoria = "Elettricità"
-            dettagli = {
-                "document_name": item["document_name"],
-                "period": item["period"],
-                "consumption": item["total_electricity_consumption"]
-            }
-            total_sum += item["total_electricity_consumption"]["value"]
-            measure_unit = item["total_electricity_consumption"]["unit"]  # Unità di misura
-        elif 'consumption_sMc' in item:
-            categoria = "Gas"
-            dettagli = {
-                "document_name": item["document_name"],
-                "period": item["period"],
-                "consumption": item["consumption_sMc"]
-            }
-            total_sum += item["consumption_sMc"]["value"]
-            measure_unit = item["consumption_sMc"]["unit"]  # Unità di misura
-        elif 'total_diesel_consumption' in item:
-            categoria = "Diesel"
-            dettagli = {
-                "document_name": item["document_name"],
-                "period": item["period"],
-                "consumption": item["total_diesel_consumption"]
-            }
-            total_sum += item["total_diesel_consumption"]["value"]
-            measure_unit = item["total_diesel_consumption"]["unit"]  # Unità di misura
-        else:
-            return jsonify({"error": f"Nessuna categoria valida trovata per l'elemento: {item}"}), 400
-
-        # Aggiungi i dettagli alla categoria appropriata
-        nuovo_documento["dati"][categoria].append(dettagli)
 
     # Inserisci il nuovo documento nella collezione `client`
     client_collection.insert_one(nuovo_documento)
@@ -221,81 +297,15 @@ def add_energy_data():
         "username": user["username"],
         "timestamp": timestamp,
         "year": anno,
-        "total_sum": total_sum,
-        "measure_unit": measure_unit  # Aggiunge l'unità di misura
+        "total_flight_impact": flight_data["total_sum"],
+        "total_electricity": electricity_data["total_sum"],
+        "total_gas": gas_data["total_sum"],
+        "measure_unit": {
+            "TotalFlightDist": "passenger * kilometers",
+            "Elettricità": "kWh",
+            "Gas": "sMc"
+        }
     }), 201
-
-
-@app.route('/get_category_sum', methods=['GET'])
-def get_category_sum():
-    api_key = request.headers.get("X-API-KEY")
-    if not api_key:
-        return jsonify({"error": "API Key mancante"}), 401
-
-    # Verifica se l'utente è valido
-    user = users_collection.find_one({"api_key": api_key})
-    if not user:
-        return jsonify({"error": "API Key non valida"}), 401
-
-    # Trova il cliente associato all'utente
-    cliente = client_collection.find_one({"utenti": api_key})
-    if not cliente:
-        return jsonify({"error": "L'utente non è associato a nessun cliente"}), 403
-
-    # Recupera i parametri dalla query string
-    categoria = request.args.get('categoria')
-    anno_inizio = request.args.get('anno_inizio')
-    anno_fine = request.args.get('anno_fine')
-
-    # Controlla i parametri obbligatori
-    if not categoria or not anno_inizio or not anno_fine:
-        return jsonify({"error": "Parametri mancanti. Specificare categoria, anno_inizio e anno_fine"}), 400
-
-    # Verifica che gli anni siano numeri validi
-    try:
-        anno_inizio = int(anno_inizio)
-        anno_fine = int(anno_fine)
-    except ValueError:
-        return jsonify({"error": "Formato anno non valido. Deve essere un numero intero"}), 400
-
-    if anno_inizio > anno_fine:
-        return jsonify({"error": "anno_inizio non può essere successivo a anno_fine"}), 400
-
-    # Controlla se la categoria è valida
-    if categoria not in ["Elettricità", "Gas", "Diesel"]:
-        return jsonify({"error": "Categoria non valida. Scegliere tra Elettricità, Gas o Diesel"}), 400
-
-    # Recupera l'ultimo documento creato dall'utente
-    ultimo_documento = client_collection.find_one(
-        {"utenti": api_key},
-        sort=[("timestamp", -1)]  # Ordina per timestamp decrescente
-    )
-
-    if not ultimo_documento or not ultimo_documento.get("dati"):
-        return jsonify({"error": "Nessun dato energetico trovato"}), 404
-
-    # Recupera i dati della categoria specificata
-    dati_categoria = ultimo_documento["dati"].get(categoria, [])
-
-    if not dati_categoria:
-        return jsonify({"error": f"Nessun dato trovato per la categoria {categoria}"}), 404
-
-    # Filtra i dati della categoria specificata nel periodo richiesto
-    somma = 0
-    for dato in dati_categoria:
-        data_inizio = datetime.strptime(dato["period"]["start_date"], "%Y-%m-%d")
-        data_fine = datetime.strptime(dato["period"]["end_date"], "%Y-%m-%d")
-
-        # Controlla se il periodo del dato è compreso nell'intervallo di anni richiesto
-        if anno_inizio <= data_inizio.year <= anno_fine or anno_inizio <= data_fine.year <= anno_fine:
-            somma += dato["consumption"]["value"]
-
-    return jsonify({
-        "categoria": categoria,
-        "anno_inizio": anno_inizio,
-        "anno_fine": anno_fine,
-        "somma": somma
-    }), 200
 
 @app.route('/get_client_data', methods=['GET'])
 def get_client_data():
