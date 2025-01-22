@@ -306,7 +306,7 @@ def add_energy_data():
             "document_type": "BUSINESS_TRAVEL",
             "value": total_flight_impact,
             "unit": "passenger * kilometers",
-            "note": "File extraction failed "+flight_discarded
+            "note": "File extraction failed: " + ", ".join(flight_discarded)
         })
     elif document_type == 'GAS':
         gas_data, total_gas, gas_discarded = process_gas_items_with_notes(data['dati'], anno)
@@ -315,7 +315,7 @@ def add_energy_data():
             "document_type": "GAS",
             "value": total_gas,
             "unit": "sMc",
-            "note": "File extraction failed "+gas_discarded
+            "note": "File extraction failed: " + ", ".join(gas_discarded)
         })
     elif document_type == 'ELECTRICITY':
         electricity_data, total_electricity, electricity_discarded = process_electricity_items_with_notes(data['dati'], anno)
@@ -324,7 +324,7 @@ def add_energy_data():
             "document_type": "ELECTRICITY",
             "value": total_electricity,
             "unit": "kWh",
-            "note": "File extraction failed "+ electricity_discarded
+            "note": "File extraction failed: " + ", ".join(electricity_discarded)
         })
 
     # Prepara il nuovo documento per il cliente
