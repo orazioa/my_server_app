@@ -227,7 +227,7 @@ def process_flight_items_with_notes(items, anno):
             "impact": flight_impact
         })
 
-    return valid_data, total_flight_impact, discarded_files
+    return valid_data, (round(total_flight_impact, 2)), discarded_files
 
 def process_gas_items_with_notes(items, anno):
     """Processa i dati relativi al gas e restituisce i documenti scartati."""
@@ -251,7 +251,7 @@ def process_gas_items_with_notes(items, anno):
             valid_data.append(item)
             total_gas += item['consumption_sMc']['value']
 
-    return valid_data, total_gas, discarded_files
+    return valid_data, (round(total_gas, 2)), discarded_files
 
 
 def process_electricity_items_with_notes(items, anno):
@@ -282,7 +282,7 @@ def process_electricity_items_with_notes(items, anno):
             valid_data.append(item)
             total_electricity += item['total_electricity_consumption']['value']
 
-    return valid_data, total_electricity, discarded_files
+    return valid_data, (round(total_electricity, 2)) , discarded_files
 
 @app.route('/add_energy_data', methods=['POST'])
 def add_energy_data():
