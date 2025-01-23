@@ -176,7 +176,7 @@ def get_and_validate_request_data():
     """Recupera e valida i dati della richiesta."""
     data = request.json
     if not data or not isinstance(data, dict) or 'anno' not in data or 'dati' not in data:
-        return None, None, {"error": "Formato dati non valido. Deve essere un dizionario con 'anno' e 'dati'"}, 400
+        return None, None, {"error": "Formato dati non valido."}, 400
     try:
         anno = int(data['anno'])
     except ValueError:
