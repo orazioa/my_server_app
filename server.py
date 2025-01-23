@@ -144,24 +144,33 @@ def get_associated_client(api_key):
     return cliente, None, None
 
 def get_distance_with_api(from_code, to_code):
-    """Calcola la distanza utilizzando l'API esterna."""
-    api_key = os.getenv("API_AERO_KEY")  # La tua chiave API per l'API esterna
+    """Calcola la distanza tra due aeroporti utilizzando l'API Airport Gap."""
+    api_key = os.getenv("AIRPORT_GAP_API_KEY")  # Assicurati che la tua chiave API sia configurata come variabile d'ambiente
     if not api_key:
-        raise Exception("API Key per l'API esterna non configurata")
+        raise Exception("API Key per Airport Gap non configurata")
 
-    units = "km"  # Puoi scegliere 'mi' per miglia
-    url = f"http://airport.api.aero/airport/distance/{from_code}/{to_code}?user_key={api_key}&units={units}"
+    url = "https://airportgap.com/api/airports/distance"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "from": from_code,
+        "to": to_code
+    }
 
     try:
-        response = requests.get(url)
+        response = requests.post(url, json=payload, headers=headers)
         if response.status_code == 200:
             data = response.json()
-            if 'distance' in data:
-                return float(data['distance'])  # Ritorna la distanza in km
-        print(f"API esterna fallita per {from_code}-{to_code}. Risposta: {response.status_code}")
+            # Restituisce la distanza in chilometri
+            return data["data"]["attributes"]["kilometers"]
+        else:
+            print(f"Errore API: {response.status_code} - {response.text}")
+            raise Exception("Impossibile calcolare la distanza tramite l'API Airport Gap")
     except Exception as e:
-        print(f"Errore durante la chiamata all'API esterna per {from_code}-{to_code}: {str(e)}")
-    raise Exception(f"Impossibile calcolare la distanza per {from_code}-{to_code} utilizzando l'API")
+        print(f"Errore durante la chiamata all'API: {str(e)}")
+        raise
 
 def get_and_validate_request_data():
     """Recupera e valida i dati della richiesta."""
@@ -191,11 +200,12 @@ def process_flight_items_with_notes(items, anno):
         if flight_date.year != anno:
             continue
 
-        # Calcola la distanza utilizzando l'API esterna
+        # Calcola la distanza utilizzando l'API Airport Gap
         try:
             distance = get_distance_with_api(item['travel']['from'], item['travel']['to'])
         except Exception as e:
             print(f"Errore: {str(e)}")
+            discarded_files.append(item['document_name'])
             continue
 
         # Calcola l'impatto del volo (distanza * numero di passeggeri)
@@ -213,6 +223,7 @@ def process_flight_items_with_notes(items, anno):
         })
 
     return valid_data, total_flight_impact, discarded_files
+
 
 def process_gas_items_with_notes(items, anno):
     """Processa i dati relativi al gas e restituisce i documenti scartati."""
