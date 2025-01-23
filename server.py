@@ -190,17 +190,22 @@ def process_flight_items_with_notes(items, anno):
     discarded_files = []
 
     for item in items:
-        # Controlla se il campo 'date' è presente
-        if 'date' not in item:
+        # Controlla se il campo 'date' è presente e non vuoto
+        if 'date' not in item or not item['date']:
             discarded_files.append(item['document_name'])
             continue
 
-        # Controlla se la data appartiene all'anno specificato
-        flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
+        try:
+            # Controlla se la data appartiene all'anno specificato
+            flight_date = datetime.strptime(item['date'], "%Y-%m-%d")
+        except ValueError:
+            discarded_files.append(item['document_name'])
+            continue
+
         if flight_date.year != anno:
             continue
 
-        # Calcola la distanza utilizzando l'API Airport Gap
+        # Calcola la distanza utilizzando l'API esterna
         try:
             distance = get_distance_with_api(item['travel']['from'], item['travel']['to'])
         except Exception as e:
@@ -224,7 +229,6 @@ def process_flight_items_with_notes(items, anno):
 
     return valid_data, total_flight_impact, discarded_files
 
-
 def process_gas_items_with_notes(items, anno):
     """Processa i dati relativi al gas e restituisce i documenti scartati."""
     valid_data = []
@@ -233,19 +237,19 @@ def process_gas_items_with_notes(items, anno):
 
     for item in items:
         # Controlla se 'period', 'start_date' e 'end_date' sono presenti
-        if 'period' not in item or 'start_date' not in item['period'] or 'end_date' not in item['period']:
+        if ('period' not in item or 
+            'start_date' not in item['period'] or not item['period']['start_date'] or 
+            'end_date' not in item['period'] or not item['period']['end_date']):
             discarded_files.append(item['document_name'])
             continue
 
         # Controlla se il periodo appartiene all'anno specificato
         start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
         end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
-        if start_date.year != anno and end_date.year != anno:
-            continue
-
-        # Somma il consumo
-        valid_data.append(item)
-        total_gas += item['consumption_sMc']['value']
+         # Controlla se il periodo si sovrappone all'anno specificato
+        if start_date.year == anno and end_date.year == anno:
+            valid_data.append(item)
+            total_gas += item['consumption_sMc']['value']
 
     return valid_data, total_gas, discarded_files
 
@@ -257,23 +261,28 @@ def process_electricity_items_with_notes(items, anno):
     discarded_files = []
 
     for item in items:
-        # Controlla se 'period', 'start_date' e 'end_date' sono presenti
-        if 'period' not in item or 'start_date' not in item['period'] or 'end_date' not in item['period']:
+        # Controlla se 'period', 'start_date' e 'end_date' sono presenti e non vuoti
+        if ('period' not in item or 
+            'start_date' not in item['period'] or not item['period']['start_date'] or 
+            'end_date' not in item['period'] or not item['period']['end_date']):
             discarded_files.append(item['document_name'])
             continue
 
-        # Controlla se il periodo appartiene all'anno specificato
-        start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
-        end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
-        if start_date.year != anno and end_date.year != anno:
+        try:
+            # Prova a parsare le date
+            start_date = datetime.strptime(item['period']['start_date'], "%Y-%m-%d")
+            end_date = datetime.strptime(item['period']['end_date'], "%Y-%m-%d")
+        except ValueError:
+            # Scarta il file se la data non è valida
+            discarded_files.append(item['document_name'])
             continue
 
-        # Somma il consumo
-        valid_data.append(item)
-        total_electricity += item['total_electricity_consumption']['value']
+        # Somma il consumo solo se l'anno di start_date e end_date coincidono con l'anno specificato
+        if start_date.year == anno or end_date.year == anno:
+            valid_data.append(item)
+            total_electricity += item['total_electricity_consumption']['value']
 
     return valid_data, total_electricity, discarded_files
-
 
 @app.route('/add_energy_data', methods=['POST'])
 def add_energy_data():
